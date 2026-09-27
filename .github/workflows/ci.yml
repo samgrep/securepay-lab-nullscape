@@ -63,7 +63,7 @@ jobs:
       # Gagal jika ada vulnerability tingkat HIGH atau CRITICAL
       - run: npm audit --audit-level=high
   # >>> TAHAP C: tambahkan job sast
-   sast:
+  sast:
     name: SAST (Semgrep)
     runs-on: ubuntu-latest
     steps:
