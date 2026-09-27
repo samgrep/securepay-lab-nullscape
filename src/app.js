@@ -2,16 +2,16 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const _ = require('lodash');
 const config = require('./config');
-const { createDb, hashPassword, all, allBound } = require('./db');
+const { createDb, verifyPassword, allBound } = require('./db');
 
+// Helper Output Encoding untuk Mencegah XSS
 function escapeHtml(str) {
-  return String(str) 
+  return String(str)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;')
-
+    .replace(/'/g, '&#039;');
 }
 
 async function createApp() {
@@ -36,13 +36,13 @@ async function createApp() {
   // Health check
   app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
-  // Halaman sambutan
+  // Halaman sambutan (Diperbaiki: Output Encoding untuk XSS)
   app.get('/welcome', (req, res) => {
     const name = req.query.name || 'Tamu';
     res.send(`<h1>Selamat datang di SecurePay, ${escapeHtml(name)}!</h1>`);
   });
 
-  // Login -> mengembalikan JWT
+  // Login -> mengembalikan JWT (Diperbaiki: Verifikasi Password)
   app.post('/api/login', (req, res) => {
     const { username, password } = req.body;
     const rows = allBound(
@@ -50,6 +50,7 @@ async function createApp() {
       'SELECT id, username, password_hash, role FROM users WHERE username = ?',
       [username]
     );
+    
     if (rows.length === 0 || !verifyPassword(String(password), rows[0].password_hash)) {
       return res.status(401).json({ error: 'Username atau password salah' });
     }
@@ -59,10 +60,10 @@ async function createApp() {
       config.jwtSecret,
       { expiresIn: '1h' }
     );
-    res.json({ token })
+    res.json({ token });
   });
 
-  // Cari pengguna berdasarkan nama
+  // Cari pengguna berdasarkan nama (Diperbaiki: Parameterized Query)
   app.get('/api/users/search', (req, res) => {
     const q = req.query.q || '';
     const rows = allBound(
@@ -73,7 +74,7 @@ async function createApp() {
     res.json(rows);
   });
 
-  // Detail pengguna berdasarkan id
+  // Detail pengguna berdasarkan id (Diperbaiki: Parameterized Query & Validasi Angka)
   app.get('/api/users/:id', (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) {
@@ -109,13 +110,13 @@ async function createApp() {
     res.json(rows[0]);
   });
 
-  // Ubah pengaturan aplikasi (digabung dengan pengaturan yang ada)
+  // Ubah pengaturan aplikasi
   app.post('/api/settings', requireAuth, (req, res) => {
     settings = _.merge(settings, req.body);
     res.json(settings);
   });
 
-  // Penanganan error
+  // Penanganan error (Diperbaiki: Catat ke console, sembunyikan stack trace dari klien)
   app.use((err, req, res, next) => {
     console.error(err.stack);
     res.status(500).json({ error: 'Terjadi kesalahan pada server' });

@@ -1,19 +1,20 @@
 const crypto = require('crypto');
 const initSqlJs = require('sql.js');
 
-// Hash password (lihat apakah ini aman?)
+// Hash password menggunakan scrypt + salt acak
 function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {
   const derivedKey = crypto.scryptSync(password, salt, 64);
   return `${salt}:${derivedKey.toString('hex')}`;
 }
 
+// Verifikasi password secara aman (Timing Safe)
 function verifyPassword(password, storedHash) {
   const [salt, key] = storedHash.split(':');
   if (!salt || !key) return false;
-
+  
   const keyBuffer = Buffer.from(key, 'hex');
   const derivedKey = crypto.scryptSync(password, salt, 64);
-
+  
   return crypto.timingSafeEqual(keyBuffer, derivedKey);
 }
 
@@ -66,4 +67,4 @@ function allBound(db, sql, params) {
   return rows;
 }
 
-module.exports = { createDb, hashPassword, all, allBound };
+module.exports = { createDb, hashPassword, verifyPassword, all, allBound };
