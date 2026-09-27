@@ -4,6 +4,16 @@ const _ = require('lodash');
 const config = require('./config');
 const { createDb, hashPassword, all, allBound } = require('./db');
 
+function escapeHtml(str) {
+  return String(str) 
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
+
+}
+
 async function createApp() {
   const app = express();
   const db = await createDb();
@@ -29,7 +39,7 @@ async function createApp() {
   // Halaman sambutan
   app.get('/welcome', (req, res) => {
     const name = req.query.name || 'Tamu';
-    res.send(`<h1>Selamat datang di SecurePay, ${name}!</h1>`);
+    res.send(`<h1>Selamat datang di SecurePay, ${escapeHtml(name)}!</h1>`);
   });
 
   // Login -> mengembalikan JWT
@@ -37,26 +47,44 @@ async function createApp() {
     const { username, password } = req.body;
     const rows = allBound(
       db,
-      'SELECT id, username, role FROM users WHERE username = ? AND password_hash = ?',
-      [username, hashPassword(String(password))]
+      'SELECT id, username, password_hash, role FROM users WHERE username = ?',
+      [username]
     );
-    if (rows.length === 0) return res.status(401).json({ error: 'Username atau password salah' });
-    const token = jwt.sign({ id: rows[0].id, username: rows[0].username, role: rows[0].role }, config.jwtSecret, {
-      expiresIn: '1h',
-    });
-    res.json({ token });
+    if (rows.length === 0 || !verifyPassword(String(password), rows[0].password_hash)) {
+      return res.status(401).json({ error: 'Username atau password salah' });
+    }
+
+    const token = jwt.sign(
+      { id: rows[0].id, username: rows[0].username, role: rows[0].role },
+      config.jwtSecret,
+      { expiresIn: '1h' }
+    );
+    res.json({ token })
   });
 
   // Cari pengguna berdasarkan nama
   app.get('/api/users/search', (req, res) => {
     const q = req.query.q || '';
-    const rows = all(db, `SELECT id, username, full_name FROM users WHERE full_name LIKE '%${q}%'`);
+    const rows = allBound(
+      db,
+      'SELECT id, username, full_name FROM users WHERE full_name LIKE ?',
+      [`%${q}%`]
+    );
     res.json(rows);
   });
 
   // Detail pengguna berdasarkan id
   app.get('/api/users/:id', (req, res) => {
-    const rows = all(db, 'SELECT id, username, full_name, role FROM users WHERE id = ' + req.params.id);
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      return res.status(400).json({ error: 'ID tidak valid' });
+    }
+
+    const rows = allBound(
+      db,
+      'SELECT id, username, full_name, role FROM users WHERE id = ?',
+      [id]
+    );
     if (rows.length === 0) return res.status(404).json({ error: 'Pengguna tidak ditemukan' });
     res.json(rows[0]);
   });
@@ -89,7 +117,8 @@ async function createApp() {
 
   // Penanganan error
   app.use((err, req, res, next) => {
-    res.status(500).send(`<pre>${err.stack}</pre>`);
+    console.error(err.stack);
+    res.status(500).json({ error: 'Terjadi kesalahan pada server' });
   });
 
   return app;
