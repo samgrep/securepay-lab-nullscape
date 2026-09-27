@@ -7,6 +7,12 @@ on:
 # Prinsip least privilege: workflow hanya boleh membaca isi repo
 permissions:
   contents: read
+# Versi tool di-pin + checksum diverifikasi.
+# Kenapa? Supaya tool keamanan tidak bisa diganti diam-diam (lihat insiden supply chain Trivy, Maret 2026).
+env:
+  GITLEAKS_VERSION: "8.30.1"
+  GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+  SEMGREP_VERSION: "1.177.0"
 
 jobs:
   # ------------------------------------------------------------
@@ -27,6 +33,20 @@ jobs:
       - run: npm test
 
   # >>> TAHAP A: tambahkan job secret-scan di bawah ini
+  secret-scan:
+    name: Secret Scan (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Install Gitleaks (versi di-pin + verifikasi checksum)
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/gitleaks.tar.gz" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/gitleaks.tar.gz" -C "$RUNNER_TEMP" gitleaks
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Scan secret di source code
+        run: gitleaks dir . --redact --verbose
   # >>> TAHAP B: tambahkan job dependency-scan
   # >>> TAHAP C: tambahkan job sast
   # >>> TAHAP D: tambahkan job deploy (security gate)
