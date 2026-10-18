@@ -76,31 +76,58 @@ jobs:
       - name: Jalankan SAST
         run: semgrep scan --config .semgrep/ --metrics=off --disable-version-check --error src
 
+  # >>> TAHAP E: DAST (menjalankan aplikasi lalu menyerangnya dari luar)
   dast:
     name: DAST (OWASP ZAP)
     needs: [build-test]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 22 }
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 22
+          cache: npm
       - run: npm ci
+      - name: Jalankan aplikasi (secret acak, hanya untuk job ini)
+        run: |
+          echo "JWT_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          echo "PAYMENT_GATEWAY_API_KEY=dummy-$(openssl rand -hex 8)" >> "$GITHUB_ENV"
       - name: Start app & tunggu siap
         run: |
           nohup npm start > app.log 2>&1 &
           for i in $(seq 1 30); do curl -sf http://localhost:3000/health && break; sleep 1; done
-      - name: ZAP scan (OpenAPI + passive + active)
+          curl -sf http://localhost:3000/health
+      - name: Ambil JWT user uji (agar endpoint terautentikasi ikut di-scan)
         run: |
-          mkdir -p dast/report
-          chmod -R 777 dast/report
-
-          docker run --rm --network host -v "$GITHUB_WORKSPACE:/zap/wrk:rw" \
-            -e DAST_TOKEN \
-            -e DAST_DIR=/zap/wrk/dast \
-            ghcr.io/zaproxy/zaproxy:stable zap.sh -cmd -silent -autorun /zap/wrk/dast/zap-plan.yaml
-            
-      - name: Paksa DAST Merah untuk Laporan Praktikum
-        run: exit 1
+          TOKEN=$(curl -sf -X POST http://localhost:3000/api/login \
+            -H 'Content-Type: application/json' \
+            -d '{"username":"budi","password":"budi123"}' | node -pe 'JSON.parse(require("fs").readFileSync(0)).token')
+          echo "::add-mask::$TOKEN"
+          echo "DAST_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+      - name: ZAP scan (OpenAPI import + passive + active)
+        run: |
+          mkdir -p dast/report && chmod 777 dast/report
+          docker run --rm --network host \
+            -v "$GITHUB_WORKSPACE:/zap/wrk:rw" \
+            -e DAST_TOKEN -e DAST_DIR=/zap/wrk/dast \
+            "$ZAP_IMAGE" zap.sh -cmd -silent -autorun /zap/wrk/dast/zap-plan.yaml
+      - name: Security gate DAST (gagal jika ada temuan Medium ke atas)
+        run: |
+          node -e '
+            const r = JSON.parse(require("fs").readFileSync("dast/report/zap-report.json"));
+            let bad = 0;
+            for (const s of r.site) for (const a of s.alerts) {
+              console.log(`[${a.riskdesc}] ${a.name} (${a.instances.length} lokasi)`);
+              if (Number(a.riskcode) >= 2) bad++;
+            }
+            if (bad) { console.error(`${bad} temuan Medium/High -> gate gagal`); process.exit(1); }
+          '
+      - name: Simpan laporan ZAP
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: zap-report
+          path: dast/report/
             
   # >>> TAHAP D: tambahkan job deploy (security gate)
   deploy:
