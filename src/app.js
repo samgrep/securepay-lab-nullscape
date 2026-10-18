@@ -19,7 +19,47 @@ async function createApp() {
   const db = await createDb();
   let settings = _.cloneDeep(config.defaultSettings);
 
+  app.disable('x-powered-by');
   app.use(express.json());
+
+  // Security headers (temuan DAST: CSP, anti-clickjacking, nosniff, X-Powered-By)
+  app.use((req, res, next) => {
+    res.set({
+      'Content-Security-Policy':
+        "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+      'X-Frame-Options': 'DENY',
+      'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'no-referrer',
+      'Cross-Origin-Resource-Policy': 'same-origin',
+      'Cache-Control': 'no-store',
+    });
+    next();
+  });
+
+  // Pembatasan percobaan login (anti brute force): maks 10 gagal / 15 menit per IP+username
+  const failedLogins = new Map();
+  const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+  const LOGIN_MAX_FAILS = 10;
+  function loginKey(req) {
+    return `${req.ip}|${String((req.body && req.body.username) || '').toLowerCase()}`;
+  }
+  function isLoginBlocked(key) {
+    const entry = failedLogins.get(key);
+    if (!entry) return false;
+    if (Date.now() - entry.first > LOGIN_WINDOW_MS) {
+      failedLogins.delete(key);
+      return false;
+    }
+    return entry.count >= LOGIN_MAX_FAILS;
+  }
+  function recordLoginFail(key) {
+    const entry = failedLogins.get(key);
+    if (!entry || Date.now() - entry.first > LOGIN_WINDOW_MS) {
+      failedLogins.set(key, { count: 1, first: Date.now() });
+    } else {
+      entry.count += 1;
+    }
+  }
 
   // Middleware autentikasi JWT
   function requireAuth(req, res, next) {
@@ -44,7 +84,11 @@ async function createApp() {
 
   // Login -> mengembalikan JWT (Diperbaiki: Verifikasi Password)
   app.post('/api/login', (req, res) => {
-    const { username, password } = req.body;
+    const { username, password } = req.body || {};
+    const key = loginKey(req);
+    if (isLoginBlocked(key)) {
+      return res.status(429).json({ error: 'Terlalu banyak percobaan login, coba lagi nanti' });
+    }
     const rows = allBound(
       db,
       'SELECT id, username, password_hash, role FROM users WHERE username = ?',
@@ -52,6 +96,7 @@ async function createApp() {
     );
     
     if (rows.length === 0 || !verifyPassword(String(password), rows[0].password_hash)) {
+      recordLoginFail(key);
       return res.status(401).json({ error: 'Username atau password salah' });
     }
 
@@ -92,7 +137,18 @@ async function createApp() {
 
   // Transfer uang antar pengguna
   app.post('/api/transfer', requireAuth, (req, res) => {
-    const { from, to, amount } = req.body;
+    const { from, to, amount } = req.body || {};
+    // Otorisasi: hanya boleh memindahkan uang dari akun milik sendiri (cegah BOLA/IDOR)
+    if (from !== req.user.username) {
+      return res.status(403).json({ error: 'Tidak boleh mentransfer dari akun orang lain' });
+    }
+    // Validasi input: nominal harus bilangan bulat positif, dan tujuan harus akun lain
+    if (!Number.isSafeInteger(amount) || amount <= 0) {
+      return res.status(400).json({ error: 'Nominal tidak valid' });
+    }
+    if (to === from) {
+      return res.status(400).json({ error: 'Akun tujuan tidak valid' });
+    }
     const sender = allBound(db, 'SELECT * FROM users WHERE username = ?', [from])[0];
     const receiver = allBound(db, 'SELECT * FROM users WHERE username = ?', [to])[0];
     if (!sender || !receiver) return res.status(404).json({ error: 'Akun tidak ditemukan' });
@@ -105,6 +161,10 @@ async function createApp() {
 
   // Lihat saldo
   app.get('/api/balance/:username', requireAuth, (req, res) => {
+    // Otorisasi: hanya pemilik akun atau admin
+    if (req.params.username !== req.user.username && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Akses ditolak' });
+    }
     const rows = allBound(db, 'SELECT username, balance FROM users WHERE username = ?', [req.params.username]);
     if (rows.length === 0) return res.status(404).json({ error: 'Akun tidak ditemukan' });
     res.json(rows[0]);
@@ -112,7 +172,30 @@ async function createApp() {
 
   // Ubah pengaturan aplikasi
   app.post('/api/settings', requireAuth, (req, res) => {
-    settings = _.merge(settings, req.body);
+    // Otorisasi: hanya admin; hanya key yang diizinkan (cegah mass assignment & prototype pollution)
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Akses ditolak' });
+    }
+    const body = req.body || {};
+    const next = { ...settings, notifications: { ...settings.notifications } };
+    if (body.currency !== undefined) {
+      if (typeof body.currency !== 'string' || !/^[A-Z]{3}$/.test(body.currency)) {
+        return res.status(400).json({ error: 'Mata uang tidak valid' });
+      }
+      next.currency = body.currency;
+    }
+    if (body.dailyTransferLimit !== undefined) {
+      if (!Number.isSafeInteger(body.dailyTransferLimit) || body.dailyTransferLimit <= 0) {
+        return res.status(400).json({ error: 'Limit tidak valid' });
+      }
+      next.dailyTransferLimit = body.dailyTransferLimit;
+    }
+    if (body.notifications && typeof body.notifications === 'object') {
+      for (const k of ['email', 'sms']) {
+        if (typeof body.notifications[k] === 'boolean') next.notifications[k] = body.notifications[k];
+      }
+    }
+    settings = next;
     res.json(settings);
   });
 
