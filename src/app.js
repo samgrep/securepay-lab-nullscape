@@ -22,10 +22,7 @@ async function createApp() {
   app.disable('x-powered-by');
   app.use(express.json());
 
-  // ==========================================
-  // SENGJA DI-COMMENT UNTUK SIMULASI PIPELINE MERAH (DAST GAGAL)
-  // ==========================================
-  /*
+  // Security headers (temuan DAST: CSP, anti-clickjacking, nosniff, X-Powered-By)
   app.use((req, res, next) => {
     res.set({
       'Content-Security-Policy':
@@ -38,7 +35,6 @@ async function createApp() {
     });
     next();
   });
-  */
 
   // Pembatasan percobaan login (anti brute force): maks 10 gagal / 15 menit per IP+username
   const failedLogins = new Map();
@@ -80,13 +76,13 @@ async function createApp() {
   // Health check
   app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
-  // Halaman sambutan
+  // Halaman sambutan (Diperbaiki: Output Encoding untuk XSS)
   app.get('/welcome', (req, res) => {
     const name = req.query.name || 'Tamu';
     res.send(`<h1>Selamat datang di SecurePay, ${escapeHtml(name)}!</h1>`);
   });
 
-  // Login -> mengembalikan JWT
+  // Login -> mengembalikan JWT (Diperbaiki: Verifikasi Password)
   app.post('/api/login', (req, res) => {
     const { username, password } = req.body || {};
     const key = loginKey(req);
@@ -112,7 +108,7 @@ async function createApp() {
     res.json({ token });
   });
 
-  // Cari pengguna berdasarkan nama
+  // Cari pengguna berdasarkan nama (Diperbaiki: Parameterized Query)
   app.get('/api/users/search', (req, res) => {
     const q = req.query.q || '';
     const rows = allBound(
@@ -123,7 +119,7 @@ async function createApp() {
     res.json(rows);
   });
 
-  // Detail pengguna berdasarkan id
+  // Detail pengguna berdasarkan id (Diperbaiki: Parameterized Query & Validasi Angka)
   app.get('/api/users/:id', (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) {
@@ -142,9 +138,11 @@ async function createApp() {
   // Transfer uang antar pengguna
   app.post('/api/transfer', requireAuth, (req, res) => {
     const { from, to, amount } = req.body || {};
+    // Otorisasi: hanya boleh memindahkan uang dari akun milik sendiri (cegah BOLA/IDOR)
     if (from !== req.user.username) {
       return res.status(403).json({ error: 'Tidak boleh mentransfer dari akun orang lain' });
     }
+    // Validasi input: nominal harus bilangan bulat positif, dan tujuan harus akun lain
     if (!Number.isSafeInteger(amount) || amount <= 0) {
       return res.status(400).json({ error: 'Nominal tidak valid' });
     }
@@ -163,6 +161,7 @@ async function createApp() {
 
   // Lihat saldo
   app.get('/api/balance/:username', requireAuth, (req, res) => {
+    // Otorisasi: hanya pemilik akun atau admin
     if (req.params.username !== req.user.username && req.user.role !== 'admin') {
       return res.status(403).json({ error: 'Akses ditolak' });
     }
@@ -173,6 +172,7 @@ async function createApp() {
 
   // Ubah pengaturan aplikasi
   app.post('/api/settings', requireAuth, (req, res) => {
+    // Otorisasi: hanya admin; hanya key yang diizinkan (cegah mass assignment & prototype pollution)
     if (req.user.role !== 'admin') {
       return res.status(403).json({ error: 'Akses ditolak' });
     }
@@ -199,7 +199,7 @@ async function createApp() {
     res.json(settings);
   });
 
-  // Penanganan error
+  // Penanganan error (Diperbaiki: Catat ke console, sembunyikan stack trace dari klien)
   app.use((err, req, res, next) => {
     console.error(err.stack);
     res.status(500).json({ error: 'Terjadi kesalahan pada server' });
