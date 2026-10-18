@@ -19,26 +19,20 @@ async function createApp() {
   const db = await createDb();
   let settings = _.cloneDeep(config.defaultSettings);
 
+  // Sengaja diaktifkan kembali agar Unit Test (baris 86) lolos dan hijau
   app.disable('x-powered-by');
   app.use(express.json());
 
-  // ==========================================
-  // SENGJA DI-COMMENT UNTUK SIMULASI PIPELINE MERAH (DAST GAGAL)
-  // ==========================================
-  /*
+  // Security headers: Hanya menyisakan CSP, tapi menghapus anti-clickjacking & nosniff
+  // Agar ZAP mendeteksi temuan Medium/Low dan membuat Job DAST gagal (merah)
   app.use((req, res, next) => {
     res.set({
       'Content-Security-Policy':
         "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
-      'X-Frame-Options': 'DENY',
-      'X-Content-Type-Options': 'nosniff',
-      'Referrer-Policy': 'no-referrer',
-      'Cross-Origin-Resource-Policy': 'same-origin',
-      'Cache-Control': 'no-store',
+      // X-Frame-Options dan X-Content-Type-Options sengaja dihapus agar ZAP menemukan celah
     });
     next();
   });
-  */
 
   // Pembatasan percobaan login (anti brute force): maks 10 gagal / 15 menit per IP+username
   const failedLogins = new Map();
