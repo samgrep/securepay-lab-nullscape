@@ -75,10 +75,30 @@ jobs:
           echo "$RUNNER_TEMP/semgrep-venv/bin" >> "$GITHUB_PATH"
       - name: Jalankan SAST
         run: semgrep scan --config .semgrep/ --metrics=off --disable-version-check --error src
+
+  dast:
+    name: DAST (OWASP ZAP)
+    needs: [build-test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+      - name: Start app & tunggu siap
+        run: |
+          nohup npm start > app.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://localhost:3000/health && break; sleep 1; done
+      - name: ZAP scan (OpenAPI + passive + active)
+        run: |
+          docker run --rm --network host -v "$GITHUB_WORKSPACE:/zap/wrk:rw" \
+            -e DAST_TOKEN \
+            -e DAST_DIR=/zap/wrk/dast \
+            ghcr.io/zaproxy/zaproxy:stable zap.sh -cmd -silent -autorun /zap/wrk/dast/zap-plan.yaml
   # >>> TAHAP D: tambahkan job deploy (security gate)
   deploy:
     name: Deploy ke Staging (simulasi)
-    needs: [build-test, secret-scan, dependency-scan, sast]
+    needs: [build-test, secret-scan, dependency-scan, sast, dast]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
