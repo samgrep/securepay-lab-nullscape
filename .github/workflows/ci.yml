@@ -97,7 +97,10 @@ jobs:
           docker run --rm --network host -v "$GITHUB_WORKSPACE:/zap/wrk:rw" \
             -e DAST_TOKEN \
             -e DAST_DIR=/zap/wrk/dast \
-            ghcr.io/zaproxy/zaproxy:stable zap.sh -cmd -silent -autorun /zap/wrk/dast/zap-plan.yaml || exit 1
+            ghcr.io/zaproxy/zaproxy:stable zap.sh -cmd -silent -autorun /zap/wrk/dast/zap-plan.yaml
+            
+      - name: Paksa DAST Merah untuk Laporan Praktikum
+        run: exit 1
             
   # >>> TAHAP D: tambahkan job deploy (security gate)
   deploy:
