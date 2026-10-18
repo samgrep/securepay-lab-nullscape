@@ -1,0 +1,75 @@
+openapi: 3.0.3
+info:
+  title: SecurePay Lab API
+  version: 1.0.0
+servers:
+  - url: http://localhost:3000
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+paths:
+  /health:
+    get:
+      responses: { '200': { description: OK } }
+  /welcome:
+    get:
+      parameters:
+        - { name: name, in: query, schema: { type: string, example: Budi } }
+      responses: { '200': { description: HTML } }
+  /api/login:
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username: { type: string, example: budi }
+                password: { type: string, example: budi123 }
+      responses: { '200': { description: JWT }, '401': { description: Gagal } }
+  /api/users/search:
+    get:
+      parameters:
+        - { name: q, in: query, schema: { type: string, example: Budi } }
+      responses: { '200': { description: OK } }
+  /api/users/{id}:
+    get:
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, example: 2 } }
+      responses: { '200': { description: OK }, '404': { description: Not found } }
+  /api/balance/{username}:
+    get:
+      security: [ { bearerAuth: [] } ]
+      parameters:
+        - { name: username, in: path, required: true, schema: { type: string, example: budi } }
+      responses: { '200': { description: OK } }
+  /api/transfer:
+    post:
+      security: [ { bearerAuth: [] } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                from: { type: string, example: budi }
+                to: { type: string, example: sari }
+                amount: { type: integer, example: 1000 }
+      responses: { '200': { description: OK } }
+  /api/settings:
+    post:
+      security: [ { bearerAuth: [] } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                currency: { type: string, example: IDR }
+      responses: { '200': { description: OK } }

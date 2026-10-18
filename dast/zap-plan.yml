@@ -1,0 +1,40 @@
+# OWASP ZAP Automation Framework plan: import OpenAPI -> passive -> active scan -> report
+env:
+  contexts:
+    - name: securepay
+      urls: ["http://localhost:3000"]
+      includePaths: ["http://localhost:3000.*"]
+  parameters:
+    failOnError: true
+    progressToStdout: true
+jobs:
+  - type: replacer
+    rules:
+      - description: JWT
+        matchType: req_header
+        matchString: Authorization
+        replacementString: "Bearer ${DAST_TOKEN}"
+        initiators: []
+  - type: openapi
+    parameters:
+      apiFile: ${DAST_DIR}/openapi.yaml
+      targetUrl: http://localhost:3000
+      context: securepay
+  - type: passiveScan-wait
+    parameters: { maxDuration: 2 }
+  - type: activeScan
+    parameters:
+      context: securepay
+      maxScanDurationInMins: 3
+  - type: report
+    parameters:
+      template: traditional-json
+      reportDir: ${DAST_DIR}/report
+      reportFile: zap-report
+    risks: [high, medium, low]
+  - type: report
+    parameters:
+      template: traditional-html
+      reportDir: ${DAST_DIR}/report
+      reportFile: zap-report
+    risks: [high, medium, low]
