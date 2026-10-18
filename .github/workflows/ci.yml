@@ -91,10 +91,15 @@ jobs:
           for i in $(seq 1 30); do curl -sf http://localhost:3000/health && break; sleep 1; done
       - name: ZAP scan (OpenAPI + passive + active)
         run: |
+          # Buat folder report dan berikan akses penuh agar bisa ditulis oleh Docker container
+          mkdir -p dast/report
+          chmod -R 777 dast/report
+
           docker run --rm --network host -v "$GITHUB_WORKSPACE:/zap/wrk:rw" \
             -e DAST_TOKEN \
             -e DAST_DIR=/zap/wrk/dast \
             ghcr.io/zaproxy/zaproxy:stable zap.sh -cmd -silent -autorun /zap/wrk/dast/zap-plan.yaml
+            
   # >>> TAHAP D: tambahkan job deploy (security gate)
   deploy:
     name: Deploy ke Staging (simulasi)
